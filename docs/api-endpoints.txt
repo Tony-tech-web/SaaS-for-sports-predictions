@@ -1,0 +1,128 @@
+FOOTBALL ORACLE SAAS - API ENDPOINTS DOCUMENTATION
+Generated: Production-Grade V2.0 (Multi-Sport: Football + Basketball)
+====================================================================
+
+This document outlines all public (Next.js App Router) and internal background (Express Data Engine) API routes, including their HTTP methods, expected payloads, and core functionalities.
+
+--------------------------------------------------------------------
+PART 1: NEXT.JS APP ROUTER (PUBLIC & CLIENT API)
+Location: app/api/**/route.js
+--------------------------------------------------------------------
+
+1. BET SLIPS (/api/slips)
+-------------------------
+Endpoint: POST /api/slips
+Function: Ingests new bet slips from users, saves them to the PostgreSQL database, and triggers the prediction engine.
+Payload: JSON containing source ('TEXT', 'IMAGE', 'OCR_IMAGE', or 'MANUAL'). 
+  - If TEXT: Requires 'rawInput'
+  - If IMAGE: Requires 'imageBase64' and 'mimeType'
+  - If MANUAL: Requires a structured 'matches' array (Team names, Bet types).
+
+Endpoint: GET /api/slips
+Function: Retrieves a paginated list of all bet slips for the authenticated user, including the matches, prediction states, outcome, and accuracy. Supports pagination and filtering (e.g., status, sport).
+
+Endpoint: GET /api/slips/[slipId]
+Function: Fetches the detailed structure of a specific bet slip by its ID.
+
+Endpoint: DELETE /api/slips/[slipId]
+Function: Permanently deletes a bet slip and cascades deletion to associated matches and predictions.
+
+2. UPLOAD & OCR (/api/upload)
+-----------------------------
+Endpoint: POST /api/upload
+Function: A stateless utility endpoint designed to extract text directly from an image. 
+Payload: FormData containing an 'image' file (JPEG/PNG/WebP, max 5MB).
+Returns: Converts the file to Base64, proxies it to Claude Vision, and returns parsed JSON matches (but does NOT trigger database insertion or prediction).
+
+3. PREDICTIONS (/api/predict)
+-----------------------------
+Endpoint: POST /api/predict
+Function: Manually forces the engine to run a prediction on a specific match or slip.
+Payload: JSON containing either { slipId } or { matchId }.
+
+Endpoint: GET /api/predict
+Function: Retrieves the real-time prediction data for a match, including the confidence tier, layer scores, simulation results, AI consensus outputs, and any red flags.
+
+4. RESULTS & VERIFICATION (/api/results)
+----------------------------------------
+Endpoint: POST /api/results
+Function: Ingests real-world final match outcomes to verify past predictions. If a prediction was wrong, this endpoint automatically Triggers the self-healing algorithm to generate a 'Formula Patch' for the failing layer.
+Payload: JSON containing { matchId, homeScore, awayScore, source } or a batch { results: [...] }.
+
+Endpoint: GET /api/results
+Function: Retrieves stored match results and accuracy tracking metadata.
+
+5. FORMULA MANAGEMENT (/api/formula)
+------------------------------------
+Endpoint: GET /api/formula
+Function: Fetches the current, active formula layer weights, JSON logic, and accuracy metrics (7d, 30d, Tier 1 rate). Can also retrieve history and patched versions via query params (e.g., ?view=patches).
+
+Endpoint: POST /api/formula
+Function: (Admin Only) Allows manual injection of base formulas, hard resets, or overrides to the JSON structure.
+
+6. USER MANAGEMENT (/api/users)
+-------------------------------
+Endpoint: GET /api/users
+Function: Retrieves user metadata (Plan, usage limits, remaining daily slip limits, etc.) mapped to their Clerk Auth session.
+
+Endpoint: PATCH /api/users
+Function: Updates user preferences and metadata profile settings.
+
+7. ADMIN (/api/admin)
+---------------------
+Endpoint: GET /api/admin
+Function: Validates administrative credentials and fetches high-level system metrics.
+
+Endpoint: POST /api/admin
+Function: Performs administrative overrides, system snapshots, or specific database cleanups.
+
+8. HEALTH CHECK (/api/health)
+-----------------------------
+Endpoint: GET /api/health
+Function: Public health check ensuring the Next.js edge environment and database connection are active.
+
+9. STRIPE WEBHOOKS (/api/webhooks/stripe)
+-----------------------------------------
+Endpoint: POST /api/webhooks/stripe
+Function: Listens to asynchronous Stripe events (e.g., subscription_created, payment_failed) and updates the User's Plan (FREE -> PRO -> ELITE) in the PostgreSQL DB.
+
+
+--------------------------------------------------------------------
+PART 2: EXPRESS DATA ENGINE (INTERNAL BACKGROUND TASKS)
+Location: server/data-engine/index.js
+Running Port: 3001
+WebSocket Core: ws://localhost:3001
+--------------------------------------------------------------------
+
+1. SYSTEM & QUEUES
+------------------
+Endpoint: GET /health
+Function: Internal Engine Health Check. Returns the engine uptime, current formula version, and active counts for the Redis/Bull queues.
+
+Endpoint: GET /queue/status/:jobId
+Function: Polls the exact completion percentage and state of a background Bull job.
+
+2. QUEUE INGESTION
+------------------
+Endpoint: POST /queue/predict
+Function: Places a massive Match Prediction job into the Redis 'predictions' queue. This isolates the heavy LLM API calls away from the Next.js thread.
+Payload: JSON containing { matchId, userId, matchData, slipId }.
+
+Endpoint: POST /queue/verify
+Function: Places a Match Verification job into the Redis 'verifications' queue. This isolates the heavy self-healing logic and root-cause analysis generated by Claude into background execution.
+Payload: JSON containing { matchId, homeScore, awayScore, source }.
+
+3. ADMIN & METRICS
+------------------
+Endpoint: POST /admin/snapshot
+Function: Forces an out-of-band "Accuracy Snapshot" job onto the queue. This forces the system to calculate the 7-day and 30-day Tier 1, 2, and 3 success rates across all recently verified matches and updates the Formula record.
+
+
+--------------------------------------------------------------------
+WEBSOCKET REAL-TIME EVENTS (For reference)
+------------------------------------------
+-> Emit 'subscribe:slip' (with slipId)
+   Listens for 'prediction:complete' and 'prediction:error' on massive multi-match accumulator bets.
+
+-> Emit 'subscribe:formula'
+   Listens globally for 'formula:patched' events. If an upset happens and the engine dynamically mutates its math layer, the UI immediately streams the update in real-time.
