@@ -4,9 +4,9 @@
   "description": "Production-grade football prediction SaaS with multi-AI consensus engine and self-healing formula",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev\" \"node server/data-engine/index.js\"",
-    "build": "next build",
-    "start": "concurrently \"next start\" \"node server/data-engine/index.js\"",
+    "dev": "node init && concurrently \"next dev\" \"node server/data-engine/index.js\"",
+    "build": "node init && next build",
+    "start": "node init && concurrently \"next start\" \"node server/data-engine/index.js\"",
     "engine": "node server/data-engine/index.js",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
@@ -47,7 +47,6 @@
     "zod-to-json-schema": "^3.23.0",
     "socket.io": "^4.7.5",
     "node-cron": "^3.0.3",
-    "cheerio": "^1.0.0",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
