@@ -1,0 +1,201 @@
+// prisma/schema.prisma  [v2.0 — multi-sport: Football + Basketball]
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan          { FREE PRO ELITE }
+enum Sport         { FOOTBALL BASKETBALL }
+enum SlipSource    { TEXT IMAGE OCR_IMAGE MANUAL }
+enum SlipStatus    { PENDING PROCESSING PREDICTED VERIFIED FAILED }
+enum ConfidenceTier { TIER1 TIER2 TIER3 }
+enum InjuryImpact  { NONE MINOR MAJOR CRITICAL }
+
+model User {
+  id               String   @id @default(cuid())
+  clerkId          String   @unique
+  email            String   @unique
+  name             String?
+  plan             Plan     @default(FREE)
+  stripeCustomerId String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  slips            BetSlip[]
+  predictions      Prediction[]
+  usage            UsageLog[]
+  @@map("users")
+}
+
+model BetSlip {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  source    SlipSource
+  rawInput  String
+  status    SlipStatus @default(PENDING)
+  sport     Sport?
+  matches   Match[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  @@index([userId])
+  @@index([status])
+  @@index([sport])
+  @@map("bet_slips")
+}
+
+model Match {
+  id          String    @id @default(cuid())
+  slipId      String
+  slip        BetSlip   @relation(fields: [slipId], references: [id])
+  sport       Sport     @default(FOOTBALL)
+  homeTeam    String
+  awayTeam    String
+  competition String?
+  scheduledAt DateTime?
+  betType     String
+  betTarget   String?
+  betLine     Float?
+  prediction  Prediction?
+  result      MatchResult?
+  createdAt   DateTime   @default(now())
+  @@index([slipId])
+  @@index([sport])
+  @@index([homeTeam, awayTeam])
+  @@map("matches")
+}
+
+model Prediction {
+  id               String         @id @default(cuid())
+  matchId          String         @unique
+  match            Match          @relation(fields: [matchId], references: [id])
+  userId           String
+  user             User           @relation(fields: [userId], references: [id])
+  formulaVersionId String
+  formulaVersion   FormulaVersion @relation(fields: [formulaVersionId], references: [id])
+  sport            Sport          @default(FOOTBALL)
+  claudeOutput     Json
+  gptOutput        Json?
+  consensusOutput  Json
+  predictedOutcome  String
+  predictedScore    String?
+  confidencePct     Float
+  confidenceTier    ConfidenceTier
+  keyDriver         String
+  redFlags          String[]
+  layerScores       Json
+  simulationResults Json
+  verdict           String
+  rationale         String        @db.Text
+  betLine           Float?
+  backToBackFlag    Boolean       @default(false)
+  injuryImpact      InjuryImpact  @default(NONE)
+  isVerified        Boolean       @default(false)
+  wasCorrect        Boolean?
+  formulaPatchApplied Boolean     @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId])
+  @@index([sport])
+  @@index([formulaVersionId])
+  @@map("predictions")
+}
+
+model MatchResult {
+  id            String  @id @default(cuid())
+  matchId       String  @unique
+  match         Match   @relation(fields: [matchId], references: [id])
+  sport         Sport   @default(FOOTBALL)
+  homeScore     Int
+  awayScore     Int
+  actualOutcome String
+  totalGoals    Float
+  homeFirstHalf     Int?
+  awayFirstHalf     Int?
+  homeFirstQuarter  Int?
+  awayFirstQuarter  Int?
+  overtime      Boolean @default(false)
+  source        String  @default("MANUAL")
+  verifiedAt    DateTime @default(now())
+  formulaPatches FormulaPatch[]
+  @@map("match_results")
+}
+
+model FormulaVersion {
+  id               String   @id @default(cuid())
+  version          String
+  sport            Sport    @default(FOOTBALL)
+  majorVersion     Int
+  minorVersion     Int
+  patchVersion     Int
+  isActive         Boolean  @default(false)
+  formulaJson      Json
+  systemPrompt     String   @db.Text
+  changelog        String   @db.Text
+  accuracy7d       Float?
+  accuracy30d      Float?
+  tier1Rate        Float?
+  totalPredictions    Int   @default(0)
+  correctPredictions  Int   @default(0)
+  createdAt        DateTime @default(now())
+  predictions      Prediction[]
+  patches          FormulaPatch[]
+  @@unique([version, sport])
+  @@index([isActive, sport])
+  @@map("formula_versions")
+}
+
+model FormulaPatch {
+  id              String         @id @default(cuid())
+  fromVersionId   String
+  fromVersion     FormulaVersion @relation(fields: [fromVersionId], references: [id])
+  resultId        String
+  result          MatchResult    @relation(fields: [resultId], references: [id])
+  sport           Sport          @default(FOOTBALL)
+  failedLayer     String
+  failureAnalysis String         @db.Text
+  failureType     String
+  predictedValue  String
+  actualValue     String
+  patchDescription String        @db.Text
+  patchDiff       Json
+  targetLayer     String
+  modifierAdded   Json
+  newVersionId    String?
+  aiReasoning     String         @db.Text
+  appliedAt       DateTime       @default(now())
+  @@index([fromVersionId])
+  @@index([sport])
+  @@map("formula_patches")
+}
+
+model UsageLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String
+  tokensUsed Int
+  model      String
+  cost       Float
+  createdAt  DateTime @default(now())
+  @@index([userId])
+  @@map("usage_logs")
+}
+
+model AccuracySnapshot {
+  id           String   @id @default(cuid())
+  versionId    String
+  sport        Sport    @default(FOOTBALL)
+  snapshotDate DateTime @default(now())
+  tier1Rate    Float
+  tier2Rate    Float
+  tier3Rate    Float
+  overallRate  Float
+  totalSampled Int
+  byBetType    Json
+  @@index([sport])
+  @@map("accuracy_snapshots")
+}
